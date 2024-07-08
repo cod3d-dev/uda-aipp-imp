@@ -4,9 +4,10 @@ import os
 import numpy as np
 
 import flower_imc as imc
+import utilities as util
 
 
-# Create a parser that accepts --save_dir and --archand --learning_rate and --hiden_units and --epochs and --gpuj
+# Create a parser for arguments needed to predict a class
 
 parser = argparse.ArgumentParser()
 
@@ -28,27 +29,28 @@ gpu = args.gpu
 
 
 # Function to predict the class of the image using our model.
-def predict(image_path, checkpoint_path, top_k, category_names_path, gpu):
+def predict(image_path, checkpoint_path, top_k, gpu):
     ''' Predict the class (or classes) of an image using a trained deep learning model.
     '''
     # Load model from checkpoint
-    model, a, b  = imc.load_checkpoint(checkpoint_path)
+    model  = imc.load_checkpoint(checkpoint_path)
 
-    model, start_epoch, optimizer_state_dict  = imc.load_checkpoint(checkpoint_path)
-
-
-    # Enter evaluation mode
-    # Set device as cpu as default
+    # As default, use cpu that is available in any system
     device = 'cpu'
+
+    # If use gpu is true, setup the device variable
     if gpu:
         device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-    
+
+    # Load model on device
     model.to(device)
     
+
+    # Enter evaluation mode
     model.eval()
 
 
-    img = imc.process_image(image_path) # Process the image
+    img = util.process_image(image_path) # Process the image
 
 
     # Convert image to tensor
@@ -85,10 +87,10 @@ def predict(image_path, checkpoint_path, top_k, category_names_path, gpu):
     return probs, classes
 
 
-probs, classes = predict(image_path, checkpoint_path, top_k, category_names_path, gpu)
+probs, classes = predict(image_path, checkpoint_path, top_k, gpu)
 
 # Load names of flowers classes from file
-cat_to_name, num_classes = imc.load_classes(category_names_path)
+cat_to_name = util.load_classes(category_names_path)
 
 class_names = [cat_to_name[item].title() for item in classes]
 

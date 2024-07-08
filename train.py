@@ -1,6 +1,4 @@
 import argparse
-import matplotlib.pyplot as plt
-import math
 import torch
 from torch import nn
 from torch import optim
@@ -8,15 +6,11 @@ import torch.nn.functional as F
 from torchvision import datasets, transforms, models
 import time
 import os
-from PIL import Image
-import numpy as np
-import json
 
 import flower_imc as imc
 
 
-# Create a parser that accepts --save_dir and --archand --learning_rate and --hiden_units and --epochs and --gpuj
-
+# Create a parser for arguments needed for our classifier
 parser = argparse.ArgumentParser()
 
 parser.add_argument('data_dir', action='store', type=str, help='Path of directory to train')
@@ -24,26 +18,38 @@ parser.add_argument('--save_dir', action='store', type=str, default='checkpoint.
 parser.add_argument('--arch', action='store', type=str, default='vgg16_bn', help='what model to use: alexnet | densenet161 | densenet169 | densenet201 | vgg11 | vgg11_bn | vgg13 | vgg13_bn | vgg16 | vgg16_bn | resnet50 | resnet101 | resnet152')
 parser.add_argument('--learning_rate', action='store', type=float, default=0.001, help='learning rate')
 parser.add_argument('--hidden_units', action='store', type=int, default=1000, help='number of hidden units')
-parser.add_argument('--epochs', action='store', type=int, default=1, help='number of epochs to train')
+parser.add_argument('--epochs', action='store', type=int, default=5, help='number of epochs to train')
 parser.add_argument('--gpu', action='store_true', default=False, help='use GPU or MPS (Apple Silicon)')
-parser.add_argument('--output_units', action='store', default=102, help='Number of classes in the training dataset')                    
-parser.add_argument('--batch_size', action='store', default=80, help='Define the batch size')
-parser.add_argument('--resume', action='store_true', default=False, help='Resume training')
+parser.add_argument('--batch_size', action='store', default=80, help='Define the batch size for the dataloaders')
+parser.add_argument('--n_workers', action='store', type=int, default=0, help='Define the number of workers for the dataloaders')
 
 
 args = parser.parse_args()
 
 # Define variables for arguments passed by the user
 data_dir = args.data_dir
-save_dir = args.save_dir
+save_path = args.save_dir
 arch = args.arch
 learning_rate = args.learning_rate
 hidden_units = args.hidden_units
 epochs = args.epochs
 gpu = args.gpu
 batch_size = args.batch_size
-resume = args.resume
-output_units = args.output_units
+workers = args.n_workers
+
+
+# As default, use cpu that is available in any system
+device = 'cpu'
+
+num_workers = 0 # By default, we setup the number of workers of dataloaders to 0 (system default)
+
+# If use gpu is true, setup the device variable
+if gpu:
+    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
+    if device == 'cuda': # If cuda is available, use the number of workers specified by the user - It increases performance
+        num_workers = workers
+
+
 
 # Transformations for training, validation, and test
 train_transforms = transforms.Compose([transforms.RandomRotation(60),
@@ -72,9 +78,9 @@ test_dataset = datasets.ImageFolder(data_dir + '/test', transform=test_transform
 validation_dataset = datasets.ImageFolder(data_dir + '/valid', transform=validation_transforms)
 
 # Define the dataloaders
-trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=4)
-testloader = torch.utils.data.DataLoader(test_dataset, batch_size=32, num_workers=4)
-validationloader = torch.utils.data.DataLoader(validation_dataset, batch_size=32, num_workers=4)
+trainloader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=num_workers)
+testloader = torch.utils.data.DataLoader(test_dataset, batch_size=32, num_workers=num_workers)
+validationloader = torch.utils.data.DataLoader(validation_dataset, batch_size=32, num_workers=num_workers)
 
 
 
@@ -86,31 +92,17 @@ print_every = 40
 start_epoch = 0
 
 # Load model and checkpoint to resume training
-if resume:
-    model, start_epoch, optimizer_state_dict,  = imc.load_checkpoint(save_dir)
-else: 
-    # Load the model
-    model = imc.load_model(args.arch, output_units, hidden_units)
+output_units = 102 # The number of classes in our dataset
 
-    # Setup the loss function and optimizer
+# Load the model
+model = imc.load_model(args.arch, output_units, hidden_units)
+
+# Setup the loss function and optimizer
 criterion = nn.NLLLoss()
 optimizer = optim.Adam(model.parameters(), lr = learning_rate)
 
-
-# Load model to GPU or MPS (Apple Silicon)
-# As default, use cpu that is available in any system
-device = 'cpu'
-
-if gpu:
-    device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
-    num_workers = 10
-else:
-    num_workers = 0
-    
 # Move model to GPU or MPS (Apple Silicon)
 model.to(device)
-if resume:
-    optimizer.load_state_dict(optimizer_state_dict)
 
 print('Flower Classifier\n',
       f'Architecture: {arch}\n',
@@ -167,7 +159,7 @@ print(f"\nEnd Epoch {epoch+1} | Total Time: {(time.time() - start_time):.2f} \n 
 # Save checkpoint
 # Get the mapping of classes to indexes to store in checkpoint for inference
 class_to_idx = train_dataset.class_to_idx
-imc.save_checkpoint(model, save_dir, optimizer.state_dict(), epochs, arch, hidden_units, output_units, class_to_idx)
+imc.save_checkpoint(model, save_path, arch, class_to_idx)
 
 
 # Do validation on the test set
